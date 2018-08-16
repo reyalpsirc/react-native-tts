@@ -116,9 +116,12 @@ RCT_EXPORT_METHOD(setDucking:(BOOL *)ducking
     
     if(ducking) {
         AVAudioSession *session = [AVAudioSession sharedInstance];
-        [session setCategory:AVAudioSessionCategoryPlayback
-                 withOptions:AVAudioSessionCategoryOptionDuckOthers
-                       error:nil];
+        AVAudioSessionCategoryOptions options = AVAudioSessionCategoryOptionDuckOthers | AVAudioSessionCategoryOptionInterruptSpokenAudioAndMixWithOthers;
+        if ([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion){.majorVersion = 10, .minorVersion = 0, .patchVersion = 0}]) {
+            [session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeSpokenAudio options:options error:nil];
+        } else {
+            [session setCategory:AVAudioSessionCategoryPlayback withOptions: options error:nil];
+        }
     }
     
     resolve(@"success");
