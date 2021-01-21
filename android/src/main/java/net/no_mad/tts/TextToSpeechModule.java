@@ -10,12 +10,16 @@ import android.net.Uri;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
 import com.facebook.react.bridge.*;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 public class TextToSpeechModule extends ReactContextBaseJavaModule {
 
@@ -27,10 +31,15 @@ public class TextToSpeechModule extends ReactContextBaseJavaModule {
     private AudioManager audioManager;
     private AudioManager.OnAudioFocusChangeListener afChangeListener;
 
+    private Map<String, Locale> localeCountryMap;
+    private Map<String, Locale> localeLanguageMap;
+
     public TextToSpeechModule(ReactApplicationContext reactContext) {
         super(reactContext);
         audioManager = (AudioManager) reactContext.getApplicationContext().getSystemService(reactContext.AUDIO_SERVICE);
         initStatusPromises = new ArrayList<Promise>();
+        //initialize ISO3, ISO2 languague country code mapping.
+        initCountryLanguageCodeMapping();
 
         tts = new TextToSpeech(getReactApplicationContext(), new TextToSpeech.OnInitListener() {
             @Override
@@ -45,36 +54,66 @@ public class TextToSpeechModule extends ReactContextBaseJavaModule {
             }
         });
 
-        tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-            @Override
-            public void onStart(String utteranceId) {
-                sendEvent("tts-start", utteranceId);
-            }
+        setUtteranceProgress();
+    }
 
-            @Override
-            public void onDone(String utteranceId) {
-                if(ducking) {
-                    audioManager.abandonAudioFocus(afChangeListener);
+    private void setUtteranceProgress() {
+        if(tts != null)
+        {
+            tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                @Override
+                public void onStart(String utteranceId) {
+                    sendEvent("tts-start", utteranceId);
                 }
-                sendEvent("tts-finish", utteranceId);
-            }
 
-            @Override
-            public void onError(String utteranceId) {
-                if(ducking) {
-                    audioManager.abandonAudioFocus(afChangeListener);
+                @Override
+                public void onDone(String utteranceId) {
+                    if(ducking) {
+                        audioManager.abandonAudioFocus(afChangeListener);
+                    }
+                    sendEvent("tts-finish", utteranceId);
                 }
-                sendEvent("tts-error", utteranceId);
-            }
 
-            @Override
-            public void onStop(String utteranceId, boolean interrupted) {
-                if(ducking) {
-                    audioManager.abandonAudioFocus(afChangeListener);
+                @Override
+                public void onError(String utteranceId) {
+                    if(ducking) {
+                        audioManager.abandonAudioFocus(afChangeListener);
+                    }
+                    sendEvent("tts-error", utteranceId);
                 }
-                sendEvent("tts-cancel", utteranceId);
-            }
-        });
+
+                @Override
+                public void onStop(String utteranceId, boolean interrupted) {
+                    if(ducking) {
+                        audioManager.abandonAudioFocus(afChangeListener);
+                    }
+                    sendEvent("tts-cancel", utteranceId);
+                }
+            });
+        }
+    }
+
+    private void initCountryLanguageCodeMapping() {
+        String[] countries = Locale.getISOCountries();
+        localeCountryMap = new HashMap<String, Locale>(countries.length);
+        for (String country: countries) {
+            Locale locale = new Locale("", country);
+            localeCountryMap.put(locale.getISO3Country().toUpperCase(), locale);
+        }
+        String[] languages = Locale.getISOLanguages();
+        localeLanguageMap = new HashMap<String, Locale>(languages.length);
+        for (String language: languages) {
+            Locale locale = new Locale(language);
+            localeLanguageMap.put(locale.getISO3Language(), locale);
+        }
+    }
+
+    private String iso3CountryCodeToIso2CountryCode(String iso3CountryCode) {
+        return localeCountryMap.get(iso3CountryCode).getCountry();
+    }
+
+    private String iso3LanguageCodeToIso2LanguageCode(String iso3LanguageCode) {
+        return localeLanguageMap.get(iso3LanguageCode).getLanguage();
     }
 
     private void resolveReadyPromise(Promise promise) {
@@ -128,6 +167,16 @@ public class TextToSpeechModule extends ReactContextBaseJavaModule {
                 promise.reject("error", "Unknown error code: " + statusCode);
                 break;
           }
+    }
+
+    private boolean isPackageInstalled(String packageName) {
+        PackageManager pm = getReactApplicationContext().getPackageManager();
+        try {
+            PackageInfo pi = pm.getPackageInfo(packageName, 0);
+            return true;
+        } catch (NameNotFoundException e) {
+            return false;
+        }
     }
 
     @Override
@@ -207,7 +256,8 @@ public class TextToSpeechModule extends ReactContextBaseJavaModule {
         if(notReady(promise)) return;
 
         if(skipTransform) {
-            promise.resolve(tts.setSpeechRate(rate));
+            int result = tts.setSpeechRate(rate);
+            resolvePromiseWithStatusCode(result, promise);
         } else {
             // normalize android rate
             // rate value will be in the range 0.0 to 1.0
@@ -216,15 +266,16 @@ public class TextToSpeechModule extends ReactContextBaseJavaModule {
             float androidRate = rate.floatValue() < 0.5f ?
                     rate.floatValue() * 2 : // linear fit {0, 0}, {0.25, 0.5}, {0.5, 1}
                     rate.floatValue() * 4 - 1; // linear fit {{0.5, 1}, {0.75, 2}, {1, 3}}
-            promise.resolve(tts.setSpeechRate(androidRate));
+            int result = tts.setSpeechRate(androidRate);
+            resolvePromiseWithStatusCode(result, promise);
         }
     }
 
     @ReactMethod
     public void setDefaultPitch(Float pitch, Promise promise) {
         if(notReady(promise)) return;
-
-        promise.resolve(tts.setPitch(pitch));
+        int result = tts.setPitch(pitch);
+        resolvePromiseWithStatusCode(result, promise);
     }
 
     @ReactMethod
@@ -262,7 +313,14 @@ public class TextToSpeechModule extends ReactContextBaseJavaModule {
                     WritableMap voiceMap = Arguments.createMap();
                     voiceMap.putString("id", voice.getName());
                     voiceMap.putString("name", voice.getName());
-                    voiceMap.putString("language", voice.getLocale().toLanguageTag());
+
+                    String language = iso3LanguageCodeToIso2LanguageCode(voice.getLocale().getISO3Language());
+                    String country = voice.getLocale().getISO3Country();
+                    if(country != "") {
+                        language += "-" + iso3CountryCodeToIso2CountryCode(country);
+                    }
+
+                    voiceMap.putString("language", language);
                     voiceMap.putInt("quality", voice.getQuality());
                     voiceMap.putInt("latency", voice.getLatency());
                     voiceMap.putBoolean("networkConnectionRequired", voice.isNetworkConnectionRequired());
@@ -279,11 +337,66 @@ public class TextToSpeechModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void setDefaultEngine(String engineName, final Promise promise) {
+        if(notReady(promise)) return;
+
+        if(isPackageInstalled(engineName)) {
+            ready = null;
+            onCatalystInstanceDestroy();
+            tts = new TextToSpeech(getReactApplicationContext(), new TextToSpeech.OnInitListener() {
+                @Override
+                public void onInit(int status) {
+                    synchronized(initStatusPromises) {
+                        ready = (status == TextToSpeech.SUCCESS) ? Boolean.TRUE : Boolean.FALSE;
+                        for(Promise p: initStatusPromises) {
+                            resolveReadyPromise(p);
+                        }
+                        initStatusPromises.clear();
+                        promise.resolve(ready);
+                    }
+                }
+            }, engineName);
+
+            setUtteranceProgress();
+        } else {
+            promise.reject("not_found", "The selected engine was not found");
+        }
+    }
+
+    @ReactMethod
+    public void engines(Promise promise) {
+        if(notReady(promise)) return;
+
+        WritableArray engineArray = Arguments.createArray();
+
+        if (Build.VERSION.SDK_INT >= 14) {
+            try {
+                String defaultEngineName = tts.getDefaultEngine();
+                for(TextToSpeech.EngineInfo engine: tts.getEngines()) {
+                    WritableMap engineMap = Arguments.createMap();
+
+                    engineMap.putString("name", engine.name);
+                    engineMap.putString("label", engine.label);
+                    engineMap.putBoolean("default", engine.name.equals(defaultEngineName));
+                    engineMap.putInt("icon", engine.icon);
+
+                    engineArray.pushMap(engineMap);
+                }
+            } catch (Exception e) {
+                promise.reject("error", "Unknown error code");
+            }
+        }
+
+        promise.resolve(engineArray);
+    }
+
+    @ReactMethod
     public void stop(Promise promise) {
         if(notReady(promise)) return;
 
         int result = tts.stop();
-        resolvePromiseWithStatusCode(result, promise);
+        boolean resultValue = (result == TextToSpeech.SUCCESS) ? Boolean.TRUE : Boolean.FALSE;
+        promise.resolve(resultValue);
     }
 
     @ReactMethod

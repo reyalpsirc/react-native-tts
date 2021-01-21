@@ -1,6 +1,6 @@
 # React Native TTS
 
-React Native TTS is a text-to-speech library for [React Native](https://facebook.github.io/react-native/) on iOS and Android.
+React Native TTS is a text-to-speech library for [React Native](https://facebook.github.io/react-native/) on iOS, Android and Windows.
 
 ## Documentation
 
@@ -13,7 +13,7 @@ React Native TTS is a text-to-speech library for [React Native](https://facebook
 
 ```shell
 npm install --save react-native-tts
-react-native link
+react-native link react-native-tts
 ```
 
 ## Usage
@@ -24,6 +24,23 @@ react-native link
 import Tts from 'react-native-tts';
 ```
 
+#### Windows
+
+1. In `windows/myapp.sln` add the `RNTTS` project to your solution:
+
+   - Open the solution in Visual Studio 2019
+   - Right-click Solution icon in Solution Explorer > Add > Existing Project
+   - Select `node_modules\react-native-tts\windows\RNTTS\RNTTS.vcxproj`
+
+2. In `windows/myapp/myapp.vcxproj` add a reference to `RNTTS` to your main application project. From Visual Studio 2019:
+
+   - Right-click main application project > Add > Reference...
+   - Check `RNTTS` from Solution Projects.
+
+3. In `pch.h` add `#include "winrt/RNTTS.h"`.
+
+4. In `app.cpp` add `PackageProviders().Append(winrt::RNTTS::ReactPackageProvider());` before `InitializeComponent();`.
+
 ### Speaking
 
 Add utterance to TTS queue and start speaking. Returns promise with utteranceId.
@@ -32,20 +49,36 @@ Add utterance to TTS queue and start speaking. Returns promise with utteranceId.
 Tts.speak('Hello, world!');
 ```
 
-Additionally, speak() allows to pass platform-specific options 'voiceId' on IOS and 'params' on Android to underlying platform API:
+Additionally, speak() allows to pass platform-specific options.
 
 ```js
-Tts.speak('Hello, world!', { iosVoiceId: 'com.apple.ttsbundle.Moira-compact' });
-Tts.speak('Hello, world!', { androidParams: { KEY_PARAM_PAN: -1, KEY_PARAM_VOLUME: 0.5, KEY_PARAM_STREAM: 'STREAM_MUSIC' } });
+// IOS
+Tts.speak('Hello, world!', {
+  iosVoiceId: 'com.apple.ttsbundle.Moira-compact',
+  rate: 0.5,
+});
+// Android
+Tts.speak('Hello, world!', {
+  androidParams: {
+    KEY_PARAM_PAN: -1,
+    KEY_PARAM_VOLUME: 0.5,
+    KEY_PARAM_STREAM: 'STREAM_MUSIC',
+  },
+});
 ```
 
 For more detail on `androidParams` properties, please take a look at [official android documentation](https://developer.android.com/reference/android/speech/tts/TextToSpeech.Engine.html). Please note that there are still unsupported key with this wrapper library such as `KEY_PARAM_SESSION_ID`. The following are brief summarization of currently implemented keys:
 
-- `KEY_PARAM_PAN` ranges from `-1` to `+1`. 
+- `KEY_PARAM_PAN` ranges from `-1` to `+1`.
 
 - `KEY_PARAM_VOLUME` ranges from `0` to `1`, where 0 means silence. Note that `1` is a default value for Android.
 
 - For `KEY_PARAM_STREAM` property, you can currently use one of `STREAM_ALARM`, `STREAM_DTMF`, `STREAM_MUSIC`, `STREAM_NOTIFICATION`, `STREAM_RING`, `STREAM_SYSTEM`, `STREAM_VOICE_CALL`,
+
+The supported options for IOS are:
+
+- `iosVoiceId` which voice to use, check [voices()](#list-voices) for available values
+- `rate` which speech rate this line should be spoken with. Will override [default rate](#set-default-speech-rate) if set for this utterance.
 
 Stop speaking and flush the TTS queue.
 
@@ -69,13 +102,15 @@ Tts.getInitStatus().then(() => {
 
 Enable lowering other applications output level while speaking (also referred to as "ducking").
 
+*(not supported on Windows)*
+
 ```js
 Tts.setDucking(true);
 ```
 
 ### List Voices
 
-Returns list of available voices 
+Returns list of available voices
 
 *(not supported on Android API Level < 21, returns empty list)*
 
@@ -108,7 +143,7 @@ Tts.setDefaultLanguage('en-IE');
 
 ### Set default Voice
 
-Sets default voice, pass one of the voiceId as reported by a call to Tts.voices() 
+Sets default voice, pass one of the voiceId as reported by a call to Tts.voices()
 
 *(not available on Android API Level < 21)*
 
@@ -124,7 +159,7 @@ Sets default speech rate. The rate parameter is a float where where 0.01 is a sl
 Tts.setDefaultRate(0.6);
 ```
 
-There is a significant difference to how the rate value is interpreted by iOS and Android native TTS APIs. To provide unified cross-platform behaviour, translation is applied to the rate value. However, if you want to turn off the translation, you can provide optional `skipTransform` parameter to `Tts.setDefaultRate()` to pass rate value unmodified.
+There is a significant difference to how the rate value is interpreted by iOS, Android and Windows native TTS APIs. To provide unified cross-platform behaviour, translation is applied to the rate value. However, if you want to turn off the translation, you can provide optional `skipTransform` parameter to `Tts.setDefaultRate()` to pass rate value unmodified.
 
 Do not translate rate parameter:
 
@@ -134,10 +169,22 @@ Tts.setDefaultRate(0.6, true);
 
 ### Set default Pitch
 
-Sets default pitch. The pitch parameter is a float where where 1.0 is a normal pitch. On iOS min pitch is 0.5 and max pitch is 2.0
+Sets default pitch. The pitch parameter is a float where where 1.0 is a normal pitch. On iOS min pitch is 0.5 and max pitch is 2.0. On Windows, min pitch is 0.0 and max pitch is 2.0.
 
 ```js
 Tts.setDefaultPitch(1.5);
+```
+
+### Controls the iOS silent switch behavior
+
+Platforms: iOS
+
+- "inherit" (default) - Use the default behavior
+- "ignore" - Play audio even if the silent switch is set
+- "obey" - Don't play audio if the silent switch is set
+
+```js
+Tts.setIgnoreSilentSwitch("ignore");
 ```
 
 ### Events
@@ -148,6 +195,17 @@ Subscribe to TTS events
 Tts.addEventListener('tts-start', (event) => console.log("start", event));
 Tts.addEventListener('tts-finish', (event) => console.log("finish", event));
 Tts.addEventListener('tts-cancel', (event) => console.log("cancel", event));
+```
+
+### Support for multiple TTS engines
+
+Platforms: Android
+
+Functions to list available TTS engines and set an engine to use.
+
+```js
+Tts.engines().then(engines => console.log(engines));
+Tts.setDefaultEngine('engineName');
 ```
 
 ### Install (additional) language data
@@ -179,7 +237,7 @@ Tts.getInitStatus().then(() => {
 
 ## Example
 
-There is an example project which shows use of react-native-tts on Android/iOS: https://github.com/themostaza/react-native-tts-example
+There is an example project which shows use of react-native-tts on Android/iOS/Windows: https://github.com/themostaza/react-native-tts-example
 
 ## License
 
